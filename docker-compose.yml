@@ -2,10 +2,22 @@ version: "3"
 
 services:
 
+  postgresl:
+    # restart: unless-stopped
+    container_name: postgresl
+    image: postgres
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      # - "./postgres/my.conf:/etc/postgresql/postgresql.conf"
+      - "./postgresl/data:/var/lib/postgresql/data:rw"
+
   postgres:
     # restart: unless-stopped
     container_name: postgres
-    image: postgres
+    image: postgres:9.6
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
@@ -23,6 +35,15 @@ services:
       - "./pgadmin/:/pgadmin:rw"
     # depends_on:
     #   - postgres
+
+  pgadmin1:
+    container_name: pgadmin1
+    image: chorss/docker-pgadmin4
+    ports:
+      - "5051:5050"
+    volumes:
+      - "./pgadmin1/data:/data chorss/docker-pgadmin4"
+      - "./pgadmin1/:/pgadmin"
 
   redis:
     container_name: redis

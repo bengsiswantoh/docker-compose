@@ -26,6 +26,7 @@ services:
       # - "./postgres/my.conf:/etc/postgresql/postgresql.conf"
       - "./postgres/data:/var/lib/postgresql/data:rw"
 
+  # run this first mkdir -p pgadmin/{config,storage}
   pgadmin:
     container_name: pgadmin
     image: thajeztah/pgadmin4
@@ -36,6 +37,7 @@ services:
     # depends_on:
     #   - postgres
 
+  # run this first mkdir -p pgadmin1/data
   pgadmin1:
     container_name: pgadmin1
     image: chorss/docker-pgadmin4

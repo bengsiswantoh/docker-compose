@@ -2,38 +2,34 @@ version: "3"
 
 services:
 
-  postgresl:
-    # restart: unless-stopped
-    container_name: postgresl
-    image: postgres
-    environment:
-      POSTGRES_PASSWORD: postgres
+  php:
+    container_name: php
+    image: php:apache
     ports:
-      - "5433:5432"
+      - 80:80
     volumes:
-      # - "./postgres/my.conf:/etc/postgresql/postgresql.conf"
-      - "./postgresl/data:/var/lib/postgresql/data:rw"
+      - ~/projects/php:/var/www/html
 
   postgres:
     # restart: unless-stopped
     container_name: postgres
-    image: postgres:9.6
+    image: postgres
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - 5432:5432
     volumes:
-      # - "./postgres/my.conf:/etc/postgresql/postgresql.conf"
-      - "./postgres/data:/var/lib/postgresql/data:rw"
+      # - ./postgres/my.conf:/etc/postgresql/postgresql.conf
+      - ./postgres/data:/var/lib/postgresql/data:rw
 
   # run this first mkdir -p pgadmin/{config,storage}
   pgadmin:
     container_name: pgadmin
     image: thajeztah/pgadmin4
     ports:
-      - "5050:5050"
+      - 5050:5050
     volumes:
-      - "./pgadmin/:/pgadmin:rw"
+      - ./pgadmin/:/pgadmin:rw
     # depends_on:
     #   - postgres
 
@@ -42,23 +38,23 @@ services:
     container_name: pgadmin1
     image: chorss/docker-pgadmin4
     ports:
-      - "5051:5050"
+      - 5051:5050
     volumes:
-      - "./pgadmin1/data:/data chorss/docker-pgadmin4"
-      - "./pgadmin1/:/pgadmin"
+      - ./pgadmin1/data:/data chorss/docker-pgadmin4
+      - ./pgadmin1/:/pgadmin
 
   redis:
     container_name: redis
     image: redis
     ports:
-      - "6379:6379"
+      - 6379:6379
 
   rabbitmq:
     container_name: rabbitmq
     image: rabbitmq:management
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - 5672:5672
+      - 15672:15672
 
   mysql:
     container_name: mysql
@@ -66,7 +62,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: root
     ports:
-      - "3306:3306"
+      - 3306:3306
     volumes:
-      # - "./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf"
-      - "./mysql/data:/var/lib/mysql:rw"
+      # - ./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf
+      - ./mysql/data:/var/lib/mysql:rw

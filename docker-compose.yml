@@ -3,17 +3,17 @@ version: "3"
 services:
 
   php:
-    container_name: php
     image: php:apache
+    container_name: php
     ports:
       - 80:80
     volumes:
       - ~/projects/php:/var/www/html
 
   postgres:
-    # restart: unless-stopped
-    container_name: postgres
     image: postgres
+    container_name: postgres
+    # restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
@@ -24,8 +24,8 @@ services:
 
   # run this first mkdir -p pgadmin/{config,storage}
   pgadmin:
-    container_name: pgadmin
     image: thajeztah/pgadmin4
+    container_name: pgadmin
     ports:
       - 5050:5050
     volumes:
@@ -35,8 +35,8 @@ services:
 
   # run this first mkdir -p pgadmin1/data
   pgadmin1:
-    container_name: pgadmin1
     image: chorss/docker-pgadmin4
+    container_name: pgadmin1
     ports:
       - 5051:5050
     volumes:
@@ -44,8 +44,8 @@ services:
       - ./pgadmin1/:/pgadmin
 
   redis:
-    container_name: redis
     image: redis
+    container_name: redis
     ports:
       - 6379:6379
 
@@ -56,9 +56,22 @@ services:
       - 5672:5672
       - 15672:15672
 
+  fluentd:
+    build: ./fluentd
+    # image: fluent/fluentd
+    container_name: fluentd
+    ports:
+      - 9880:9880
+    volumes:
+      - ./fluentd:/fluentd/etc
+      - ./fluentd/plugins:/fluentd/plugins
+    environment:
+      - FLUENTD_CONF=fluentd.conf
+
+
   mysql:
-    container_name: mysql
     image: mysql
+    container_name: mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
     ports:

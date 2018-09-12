@@ -1,3 +1,5 @@
 mysql/data
 postgres/data
 pgadmin
+
+.byebug_history

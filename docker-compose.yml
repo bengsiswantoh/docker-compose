@@ -1,15 +1,6 @@
 version: "3"
 
 services:
-
-  php:
-    image: php:apache
-    container_name: php
-    ports:
-      - 80:80
-    volumes:
-      - ~/projects/php:/var/www/html
-
   postgres:
     image: postgres
     container_name: postgres
@@ -43,32 +34,6 @@ services:
       - ./pgadmin1/data:/data chorss/docker-pgadmin4
       - ./pgadmin1/:/pgadmin
 
-  redis:
-    image: redis
-    container_name: redis
-    ports:
-      - 6379:6379
-
-  rabbitmq:
-    container_name: rabbitmq
-    image: rabbitmq:management
-    ports:
-      - 5672:5672
-      - 15672:15672
-
-  fluentd:
-    build: ./fluentd
-    # image: fluent/fluentd
-    container_name: fluentd
-    ports:
-      - 9880:9880
-    volumes:
-      - ./fluentd:/fluentd/etc
-      - ./fluentd/plugins:/fluentd/plugins
-    environment:
-      - FLUENTD_CONF=fluentd.conf
-
-
   mysql:
     image: mysql
     container_name: mysql
@@ -79,3 +44,47 @@ services:
     volumes:
       # - ./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf
       - ./mysql/data:/var/lib/mysql:rw
+
+  redis:
+    image: redis
+    container_name: redis
+    ports:
+      - 6379:6379
+
+  # mongo:
+  #   image: mongo
+  #   container_name: mongo
+  #   ports:
+  #     - 27017:27017
+  #   volumes:
+  #     - ./mongo/data:/data/db
+
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+
+  fluentd:
+    build: ./fluentd/dockerfile
+    container_name: fluentd
+    ports:
+      - 9880:9880
+    volumes:
+      - ./fluentd/plugins:/fluentd/plugins
+      - ./fluentd/etc:/fluentd/etc
+    environment:
+      - FLUENTD_CONF=fluentd.conf
+
+  php:
+    image: php:apache
+    container_name: php
+    ports:
+      - 80:80
+    volumes:
+      - ~/projects/php:/var/www/html
+
+  # java7:
+  #   image: openjdk:7-jdk
+  #   container_name: java7

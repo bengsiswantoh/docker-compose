@@ -11,9 +11,14 @@ services:
       - 5432:5432
     volumes:
       # - ./postgres/my.conf:/etc/postgresql/postgresql.conf
-      - ./postgres/data:/var/lib/postgresql/data:rw
+      # - ./postgres/data:/var/lib/postgresql/data:rw
 
-  # run this first mkdir -p pgadmin/{config,storage}
+      # for windows use this
+      # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
+      # docker volume create --name postgres-vol -d local
+      - postgres-vol:/var/lib/postgresql/data:rw
+
+  # mkdir -p pgadmin/{config,storage}
   pgadmin:
     image: thajeztah/pgadmin4
     container_name: pgadmin
@@ -24,7 +29,7 @@ services:
     # depends_on:
     #   - postgres
 
-  # run this first mkdir -p pgadmin1/data
+  # mkdir -p pgadmin1/data
   pgadmin1:
     image: chorss/docker-pgadmin4
     container_name: pgadmin1
@@ -33,6 +38,14 @@ services:
     volumes:
       - ./pgadmin1/data:/data chorss/docker-pgadmin4
       - ./pgadmin1/:/pgadmin
+
+  pghero:
+    image: ankane/pghero
+    container_name: pghero
+    ports:
+      - 8080:8080
+    volumes:
+      - ./pghero/pghero.yml:/app/config/pghero.yml
 
   mysql:
     image: mysql
@@ -84,7 +97,11 @@ services:
       - 80:80
     volumes:
       - ~/projects/php:/var/www/html
-
   # java7:
   #   image: openjdk:7-jdk
   #   container_name: java7
+
+# for windows use this
+volumes:
+  postgres-vol:
+    external: true

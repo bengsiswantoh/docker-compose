@@ -4,19 +4,22 @@ services:
   postgres:
     image: postgres
     container_name: postgres
+    # auto start container
     # restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: postgres
     ports:
+      # host port:docker port
       - 5432:5432
     volumes:
-      # - ./postgres/my.conf:/etc/postgresql/postgresql.conf
-      # - ./postgres/data:/var/lib/postgresql/data:rw
-
-      # for windows use this
+      # mount configurations
+      - ./postgres/my.conf:/etc/postgresql/postgresql.conf
+      # mount data
+      - ./postgres/data:/var/lib/postgresql/data:rw
+      # mount data for windows use this
       # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
       # docker volume create --name postgres-vol -d local
-      - postgres-vol:/var/lib/postgresql/data:rw
+      # - postgres-vol:/var/lib/postgresql/data:rw
 
   # mkdir -p pgadmin/{config,storage}
   pgadmin:
@@ -25,7 +28,9 @@ services:
     ports:
       - 5050:5050
     volumes:
+      # mount configurations
       - ./pgadmin/:/pgadmin:rw
+    # if you want to start postgres when starting pgadmin
     # depends_on:
     #   - postgres
 
@@ -97,11 +102,12 @@ services:
       - 80:80
     volumes:
       - ~/projects/php:/var/www/html
+
   # java7:
   #   image: openjdk:7-jdk
   #   container_name: java7
 
 # for windows use this
-volumes:
-  postgres-vol:
-    external: true
+# volumes:
+#   postgres-vol:
+#     external: true

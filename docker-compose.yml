@@ -12,8 +12,10 @@ services:
       # host port:docker port
       - 5432:5432
     volumes:
+      - ./postgres:/postgres
       # mount configurations
       - ./postgres/my.conf:/etc/postgresql/postgresql.conf
+
       # mount data
       - ./postgres/data:/var/lib/postgresql/data:rw
       # mount data for windows use this
@@ -29,7 +31,9 @@ services:
       - 5050:5050
     volumes:
       # mount configurations
-      - ./pgadmin/:/pgadmin:rw
+      - ./pgadmin:/pgadmin:rw
+      - ./postgres:/postgres
+
     # if you want to start postgres when starting pgadmin
     # depends_on:
     #   - postgres
@@ -101,7 +105,7 @@ services:
     ports:
       - 80:80
     volumes:
-      - ~/projects/php:/var/www/html
+      - ./php:/var/www/html
 
   # java7:
   #   image: openjdk:7-jdk

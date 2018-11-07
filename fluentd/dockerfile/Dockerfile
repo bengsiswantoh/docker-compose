@@ -35,6 +35,8 @@ RUN apk update \
  #  beng
  && gem install pg \
  && gem install redis \
+ && gem install bunny \
+ && gem install connection_pool \
 #  && apk del .build-deps \
  #  === beng
  && rm -rf /var/cache/apk/* \

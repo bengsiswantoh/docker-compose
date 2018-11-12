@@ -17,36 +17,27 @@ services:
       - ./postgres/my.conf:/etc/postgresql/postgresql.conf
 
       # mount data
-      - ./postgres/data:/var/lib/postgresql/data:rw
+      # - ./postgres/data:/var/lib/postgresql/data:rw
       # mount data for windows use this
       # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
       # docker volume create --name postgres-vol -d local
-      # - postgres-vol:/var/lib/postgresql/data:rw
+      - postgres-vol:/var/lib/postgresql/data:rw
 
-  # mkdir -p pgadmin/{config,storage}
   pgadmin:
-    image: thajeztah/pgadmin4
+    image: dpage/pgadmin4
     container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: postgres@postgres.com
+      PGADMIN_DEFAULT_PASSWORD: postgres
     ports:
-      - 5050:5050
+      - 5050:80
     volumes:
       # mount configurations
-      - ./pgadmin:/pgadmin:rw
+      - ./pgadmin:/var/lib/pgadmin
       - ./postgres:/postgres
-
     # if you want to start postgres when starting pgadmin
     # depends_on:
     #   - postgres
-
-  # mkdir -p pgadmin1/data
-  pgadmin1:
-    image: chorss/docker-pgadmin4
-    container_name: pgadmin1
-    ports:
-      - 5051:5050
-    volumes:
-      - ./pgadmin1/data:/data chorss/docker-pgadmin4
-      - ./pgadmin1/:/pgadmin
 
   pghero:
     image: ankane/pghero
@@ -94,8 +85,7 @@ services:
     ports:
       - 9880:9880
     volumes:
-      - ./fluentd/plugins:/fluentd/plugins
-      - ./fluentd/etc:/fluentd/etc
+      - ./fluentd:/fluentd
     environment:
       - FLUENTD_CONF=fluentd.conf
 
@@ -112,6 +102,6 @@ services:
   #   container_name: java7
 
 # for windows use this
-# volumes:
-#   postgres-vol:
-#     external: true
+volumes:
+  postgres-vol:
+    external: true

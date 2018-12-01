@@ -1,3 +1,5 @@
+# docker.for.win.localhost
+
 version: "3"
 
 services:
@@ -15,13 +17,12 @@ services:
       - ./postgres:/postgres
       # mount configurations
       - ./postgres/my.conf:/etc/postgresql/postgresql.conf
-
       # mount data
-      # - ./postgres/data:/var/lib/postgresql/data:rw
+      - ./postgres/data:/var/lib/postgresql/data:rw
       # mount data for windows use this
       # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
       # docker volume create --name postgres-vol -d local
-      - postgres-vol:/var/lib/postgresql/data:rw
+      # - postgres-vol:/var/lib/postgresql/data:rw
 
   pgadmin:
     image: dpage/pgadmin4
@@ -35,9 +36,11 @@ services:
       # mount configurations
       - ./pgadmin:/var/lib/pgadmin
       - ./postgres:/postgres
-    # if you want to start postgres when starting pgadmin
-    # depends_on:
-    #   - postgres
+    depends_on:
+      # start postgres when starting pgadmin
+      - postgres
+    links:
+      - postgres
 
   pghero:
     image: ankane/pghero
@@ -57,7 +60,6 @@ services:
     volumes:
       # - ./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf
       - ./mysql/data:/var/lib/mysql:rw
-
   redis:
     image: redis
     container_name: redis
@@ -82,8 +84,6 @@ services:
   fluentd:
     build: ./fluentd/dockerfile
     container_name: fluentd
-    ports:
-      - 9880:9880
     volumes:
       - ./fluentd:/fluentd
     environment:
@@ -96,12 +96,10 @@ services:
       - 80:80
     volumes:
       - ./php:/var/www/html
-
   # java7:
   #   image: openjdk:7-jdk
   #   container_name: java7
-
 # for windows use this
-volumes:
-  postgres-vol:
-    external: true
+# volumes:
+#   postgres-vol:
+#     external: true

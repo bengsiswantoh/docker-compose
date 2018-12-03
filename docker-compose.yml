@@ -16,9 +16,9 @@ services:
     volumes:
       - ./postgres:/postgres
       # mount configurations
-      - ./postgres/my.conf:/etc/postgresql/postgresql.conf
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
       # mount data
-      - ./postgres/data:/var/lib/postgresql/data:rw
+      # - ./postgres/data:/var/lib/postgresql/data
       # mount data for windows use this
       # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
       # docker volume create --name postgres-vol -d local
@@ -36,11 +36,9 @@ services:
       # mount configurations
       - ./pgadmin:/var/lib/pgadmin
       - ./postgres:/postgres
-    depends_on:
-      # start postgres when starting pgadmin
-      - postgres
-    links:
-      - postgres
+    # depends_on:
+    # start postgres when starting pgadmin
+    # - postgres
 
   pghero:
     image: ankane/pghero
@@ -60,6 +58,7 @@ services:
     volumes:
       # - ./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf
       - ./mysql/data:/var/lib/mysql:rw
+
   redis:
     image: redis
     container_name: redis

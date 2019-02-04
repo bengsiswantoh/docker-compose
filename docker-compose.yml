@@ -15,10 +15,8 @@ services:
       - 5432:5432
     volumes:
       - ./postgres:/postgres
-      # mount configurations
-      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf
       # mount data
-      # - ./postgres/data:/var/lib/postgresql/data
+      - ./postgres/data:/var/lib/postgresql/data
       # mount data for windows use this
       # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
       # docker volume create --name postgres-vol -d local
@@ -65,13 +63,13 @@ services:
     ports:
       - 6379:6379
 
-  # mongo:
-  #   image: mongo
-  #   container_name: mongo
-  #   ports:
-  #     - 27017:27017
-  #   volumes:
-  #     - ./mongo/data:/data/db
+  mongo:
+    image: mongo
+    container_name: mongo
+    ports:
+      - 27017:27017
+    # volumes:
+    #   - ./mongo/data:/data/db
 
   rabbitmq:
     image: rabbitmq:management
@@ -87,6 +85,9 @@ services:
       - ./fluentd:/fluentd
     environment:
       - FLUENTD_CONF=fluentd.conf
+    links:
+      - redis
+      - postgres
 
   php:
     image: php:apache

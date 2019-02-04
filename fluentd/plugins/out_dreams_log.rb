@@ -49,6 +49,10 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   config_param :redis_pool_size, :integer, default: 5
   config_param :redis_pool_timeout, :integer, default: 1
 
+  config_param :table_mail_logs, :string, default: "mail_logs"
+  config_param :table_mail_log_messages, :string, default: "mail_log_messages"
+  config_param :table_mail_log_statuses, :string, default: "mail_log_statuses"
+
   attr_accessor :pg_conn
   attr_accessor :redis_conn
   attr_accessor :redis_expire_time
@@ -271,7 +275,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
     if result
       record["rejects"][result["to"]] = build_recipient(time, message, result["status"])
-      if !message.match(/Recipient address rejected:/)
+      if data["key"] == "NOQUEUE" || message.match(/reject: header Subject/) || message.match(/reject: header Content-Type/)
         record["removed"] = true
         record["step"] = INCOMING_EMAIL
       end
@@ -313,10 +317,10 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
       data = [ record["host"], record["from"], to, format_time_db(record["time"]), parse_array_to_pg(queued_as), "" ]
 
-      query = "SELECT id FROM #{@schema}.mail_logs WHERE host=$1 AND sender=$2 AND recipient=$3 AND process_start=$4 AND queued_as=$5 AND message_id=$6"
+      query = "SELECT id FROM #{@schema}.#{@table_mail_logs} WHERE host=$1 AND sender=$2 AND recipient=$3 AND process_start=$4 AND queued_as=$5 AND message_id=$6"
       pg_row = execute_and_return(query, data)
       if !pg_row
-        query = "INSERT INTO #{@schema}.mail_logs (host, sender, recipient, process_start, queued_as, message_id) VALUES ($1, $2, $3, $4, $5, $6) returning id"
+        query = "INSERT INTO #{@schema}.#{@table_mail_logs} (host, sender, recipient, process_start, queued_as, message_id) VALUES ($1, $2, $3, $4, $5, $6) returning id"
         pg_row = execute_and_return(query, data, true)
       end
       mail_log_id = pg_row["id"]
@@ -396,15 +400,16 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       end
 
       queued_as += parse_pg_to_array(pg_row, "queued_as")
+      log.fatal queued_as
       message_id = pg_row["message_id"] if message_id == ""
 
       # check with current time
       time = pg_row["process_start"] if pg_row["process_start"] != nil && pg_row["process_start"] < time
 
-      query = "UPDATE #{@schema}.mail_logs SET host=$1, sender=$2, recipient=$3, process_start=$4, queued_as=$5, message_id=$6 WHERE id=$7 returning id"
+      query = "UPDATE #{@schema}.#{@table_mail_logs} SET host=$1, sender=$2, recipient=$3, process_start=$4, queued_as=$5, message_id=$6 WHERE id=$7 returning id"
       data = [ pg_row["id"] ]
     else
-      query = "INSERT INTO #{@schema}.mail_logs (host, sender, recipient, process_start, queued_as, message_id) VALUES ($1, $2, $3, $4, $5, $6) returning id"
+      query = "INSERT INTO #{@schema}.#{@table_mail_logs} (host, sender, recipient, process_start, queued_as, message_id) VALUES ($1, $2, $3, $4, $5, $6) returning id"
       data = []
     end
 
@@ -431,7 +436,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     data = [ mail_log_id, detail["message"], time ]
     pg_row = search_message(data)
     if !pg_row
-      query = "INSERT INTO #{@schema}.mail_log_messages (mail_log_id, content, log_time) VALUES ($1, $2, $3) returning id"
+      query = "INSERT INTO #{@schema}.#{@table_mail_log_messages} (mail_log_id, content, log_time) VALUES ($1, $2, $3) returning id"
       pg_row = execute_and_return(query, data, true)
     end
 
@@ -447,12 +452,12 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     pg_row = search_status(data)
     data = [ detail["status"], time, mail_log_message_id ]
     if pg_row
-      query = "UPDATE #{@schema}.mail_log_statuses SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}" if update
+      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}" if update
     else
       data = [ mail_log_id, to ] + data
-      query = "INSERT INTO #{@schema}.mail_log_statuses (mail_log_id, recipient, status, log_time, mail_log_message_id) VALUES ($1, $2, $3 ,$4, $5)"
+      query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, log_time, mail_log_message_id) VALUES ($1, $2, $3 ,$4, $5)"
     end
-    execute_query(query, data, true)
+    execute_query(query, data, true) if query
   end
 
   ##
@@ -481,7 +486,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   # Search mail logs
   def search_log(params)
     data = []
-    query = "SELECT id, recipient, process_start, queued_as, message_id FROM #{@schema}.mail_logs WHERE '#{params[:key]}'=ANY(queued_as) "
+    query = "SELECT id, recipient, process_start, queued_as, message_id FROM #{@schema}.#{@table_mail_logs} WHERE '#{params[:key]}'=ANY(queued_as) "
     query += "OR '#{params[:message_id]}'=message_id " if params[:message_id]
     query += "OR '#{params[:queued_as]}'=ANY(queued_as) " if params[:queued_as]
     query += "ORDER BY id DESC "
@@ -492,14 +497,14 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   ##
   # Search mail log message
   def search_message(data)
-    query = "SELECT id FROM #{@schema}.mail_log_messages WHERE mail_log_id=$1 AND content=$2 AND log_time=$3"
+    query = "SELECT id FROM #{@schema}.#{@table_mail_log_messages} WHERE mail_log_id=$1 AND content=$2 AND log_time=$3"
     execute_and_return(query, data)
   end
 
   ##
   # Search mail log status
   def search_status(data)
-    query = "SELECT id FROM #{@schema}.mail_log_statuses WHERE mail_log_id=$1 AND recipient=$2"
+    query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2"
     execute_and_return(query, data)
   end
 

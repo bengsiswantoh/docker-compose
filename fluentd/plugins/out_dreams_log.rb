@@ -231,11 +231,10 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     end
 
     # set step to IGNORED_EMAIL
-    result = message.match(/uid=0/)
-    record["step"] = IGNORED_EMAIL if result
+    # result = message.match(/uid=0/)
+    # record["step"] = IGNORED_EMAIL if result
 
     record["recipients"] ||= {}
-    record["rejects"] ||= {}
 
     # search subject
     # step INCOMING_EMAIL
@@ -271,14 +270,13 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       record["recipients"][result["to"]] = build_recipient(time, message, result["status"], result["relay"])
     end
 
-    # REJECT
+    # REJECT AND NOQUEUE
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
-    if result
-      record["rejects"][result["to"]] = build_recipient(time, message, result["status"])
-      if data["key"] == "NOQUEUE" || message.match(/reject: header Subject/) || message.match(/reject: header Content-Type/)
-        record["removed"] = true
-        record["step"] = INCOMING_EMAIL
-      end
+    if result || data["key"] == "NOQUEUE"
+      record["recipients"][result["to"]] = build_recipient(time, message, result["status"])
+
+      record["removed"] = true
+      record["step"] = INCOMING_EMAIL if record["step"]
     end
 
     # queue: removed
@@ -325,7 +323,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       end
       mail_log_id = pg_row["id"]
 
-      record["rejects"].each do |to, detail|
+      record["recipients"].each do |to, detail|
         insert_message_status(mail_log_id, to, detail)
       end
 
@@ -345,19 +343,12 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
         insert_message_status(mail_log_id, to, detail, false)
       end
 
-      # ini untuk yang reject yang ada queue lanjutannya
-      record["rejects"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
-      end
-
     when SPAM_ASSASSIN
       mail_log_id = insert_log(record)
 
-      # TODO check case is message and status need to inserted to db
-      # record["recipients"].each do |to, detail|
-      #   # insert mail log messages
-      #   insert_messages(mail_log_id, detail)
-      # end
+      record["recipients"].each do |to, detail|
+        insert_message_status(mail_log_id, to, detail, false)
+      end
 
     when PROCESS_EMAIL
       mail_log_id = insert_log(record)
@@ -384,7 +375,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     queued_as = [ record["key"] ]
 
     params[:message_id] = message_id if message_id && message_id.length > 0
-    if record["queued_as"]
+    if record["queued_as"] && record["queued_as"].length > 0
       params[:queued_as] = record["queued_as"]
       queued_as << record["queued_as"]
     end
@@ -400,7 +391,6 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       end
 
       queued_as += parse_pg_to_array(pg_row, "queued_as")
-      log.fatal queued_as
       message_id = pg_row["message_id"] if message_id == ""
 
       # check with current time
@@ -463,7 +453,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   ##
   # Parse recipients get key
   def parse_recipients(record)
-    record["recipients"].map { |to, detail| to } + record["rejects"].map { |to, detail| to }
+    record["recipients"].map { |to, detail| to }
   end
 
   ##

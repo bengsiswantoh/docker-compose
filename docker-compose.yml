@@ -34,6 +34,8 @@ services:
       # mount configurations
       - ./pgadmin:/var/lib/pgadmin
       - ./postgres:/postgres
+    links:
+      - postgres
     # depends_on:
     # start postgres when starting pgadmin
     # - postgres

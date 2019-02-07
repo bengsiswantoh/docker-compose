@@ -3,3 +3,4 @@ postgres/data
 pgadmin
 
 .byebug_history
+*.log

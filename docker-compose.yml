@@ -98,6 +98,16 @@ services:
       - 80:80
     volumes:
       - ./php:/var/www/html
+
+  ruby_runner:
+    build: ./ruby_runner
+    container_name: ruby_runner
+    volumes:
+      - ./ruby_runner:/usr/src/myapp
+    command: ruby /usr/src/myapp/read_files.rb
+    links:
+      - postgres
+      - redis
   # java7:
   #   image: openjdk:7-jdk
   #   container_name: java7

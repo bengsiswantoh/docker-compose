@@ -1,0 +1,19 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    byebug (10.0.2)
+    connection_pool (2.2.2)
+    pg (1.1.4)
+    redis (4.1.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  byebug
+  connection_pool
+  pg
+  redis
+
+BUNDLED WITH
+   1.17.2

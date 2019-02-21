@@ -19,11 +19,11 @@ class MyParser
   # ignored email
   IGNORED_EMAIL = 10
 
-  def initialize(logger, redis, pg)
+  def initialize(logger, redis, pg, schema)
     @logger = logger
     @redis = redis
     @pg = pg
-    @schema = "_file_second"
+    @schema = schema
 
     redis_expire_hours = 27
     @redis_expire_time = redis_expire_hours * 3600
@@ -39,7 +39,7 @@ class MyParser
     key = data["key"]
 
     # generate redis key
-    redis_key = generate_key(@schema, key)
+    redis_key = redis_key_of(@schema, key)
 
     # merge with information build from message
     record = build_record(data, redis_key)
@@ -128,10 +128,11 @@ class MyParser
         record["step"] = PROCESS_EMAIL if !record["step"]
       end
 
-      result["status"] == "virus" if record["message"] == "250 Virus Detected; Discarded Email"
+      status = result["status"]
+      status = "virus" if result["message"] == "250 Virus Detected; Discarded Email"
 
-      if record["step"] != ANTI_VIRUS || (record["step"] == ANTI_VIRUS && result["status"] == "virus")
-        record["recipients"][result["to"]] = build_recipient(time, message, result["status"], result["relay"])
+      if record["step"] != ANTI_VIRUS || status == "virus"
+        record["recipients"][result["to"]] = build_recipient(time, message, status, result["relay"])
       end
     end
 
@@ -151,7 +152,7 @@ class MyParser
     record
   end
 
-  def generate_key(schema, key)
+  def redis_key_of(schema, key)
     "log-#{schema}-#{key}"
   end
 

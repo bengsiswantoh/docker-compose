@@ -1,0 +1,11 @@
+redis_host: "redis"
+redis_db: 1
+redis_password:
+redis_port: "6379"
+pg_host: "postgres"
+pg_dbname: "email_production"
+pg_user: "postgres"
+pg_password: "postgres"
+pg_port: "5432"
+pg_schema: "test"
+log_path: "/usr/src/myapp/logs/*"

@@ -13,20 +13,20 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   # rejected and has no queue
   NOQUEUE_EMAIL = 0
 
-  # get email header from this process from, to, and subject
-  INCOMING_EMAIL = 1
+  # relay=127.0.0.1[127.0.0.1]:10026
+  ANTI_VIRUS = 1
 
-  # SPAM_ASSASSIN is a requeue, this process generate message-id if email message-id empty
+  # relay=spamassassin
   SPAM_ASSASSIN = 2
 
-  # PROCESS_EMAIL is delivery status including autoforward and detail from alias
+  # relay=#{email_server}
   PROCESS_EMAIL = 3
 
-  # bounce email status
-  BOUNCE_EMAIL = 4
+  # relay=127.0.0.1[127.0.0.1]:10027
+  WHITELIST = 4
 
-  # ignored email
-  IGNORED_EMAIL = 10
+  # relay=dreamavis.dwp.net.id[45.64.4.191]:10024
+  AMAVIS = 5
 
   # config_param defines a parameter. You can refer a parameter via @path instance variable
   # Without :default, a parameter is required.
@@ -124,31 +124,12 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       log.info "receive #{Time.at(time)}, #{data}"
 
       key = data["key"]
-      record = nil
 
-      if key != "NOQUEUE"
-        # generate redis key
-        redis_key = redis_key_of(key)
-
-        # get data from redis
-        self.redis_conn.with do |conn|
-          record = conn.get(redis_key)
-        end
-      end
-
-      if !record
-        record = {
-          "schema" => @schema,
-          "removed" => false,
-          "key" => key,
-          "host" => data["host"]
-        }
-      else
-        record = JSON.parse(record)
-      end
+      # generate redis key
+      redis_key = redis_key_of(key)
 
       # merge with information build from message
-      record = build_record(record, data)
+      record = build_record(data, redis_key)
 
       if key != "NOQUEUE"
         self.redis_conn.with do |conn|
@@ -210,77 +191,99 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   ##
   # search information from message
-  def build_record(record, data)
-    message = data["message"]
-    time = Time.parse(data["ltime"]).to_s
+  def build_record(data, redis_key)
+    key = data["key"]
 
+    record = {
+      "key" => key,
+      "removed" => false,
+      "schema" => @schema,
+      "host" => data["host"]
+    }
+
+    # set step to NOQUEUE
+    if key == "NOQUEUE"
+      record["step"] = NOQUEUE_EMAIL
+      record["removed"] = true
+    else
+      # get data from redis
+      self.redis_conn.with do |conn|
+        redis_data = conn.get(redis_key)
+      end
+      record = JSON.parse(redis_data) if redis_data
+    end
+
+    time = Time.parse(data["ltime"]).to_s
     record["time"] = time if !record["time"] || (record["time"] && time < record["time"])
+
+    message = data["message"]
 
     # search from
     result = message.match(/from=<(?<from>[^>]*)>/)
     if result && !record["from"]
       record["from"] = result["from"]
-      # set step to bounce email
-      record["step"] = BOUNCE_EMAIL if result["from"] == ""
     end
-
-    # set step to NOQUEUE
-    if data["key"] == "NOQUEUE"
-      record["step"] = NOQUEUE_EMAIL
-      record["removed"] = true
-    end
-
-    # set step to IGNORED_EMAIL
-    # result = message.match(/uid=0/)
-    # record["step"] = IGNORED_EMAIL if result
-
-    record["recipients"] ||= {}
 
     # search subject
-    # step INCOMING_EMAIL
+    # step ANTI_VIRUS
     # result = message.match(/Subject: (?<subject>.*) from /)
     # record["subject"] = result["subject"] if result
 
     # search queued as
-    # step INCOMING_EMAIL
+    # step ANTI_VIRUS
     result = message.match(/queued as (?<queued>[^\)]*)/)
     record["queued_as"] = result["queued"] if result
 
     # search message-id
-    # step INCOMING_EMAIL can be empty string so message-id optional
+    # step ANTI_VIRUS can be empty string so message-id optional
     # step SPAM_ASSASSIN and step PROCESS_EMAIL
     result = message.match(/message-id=<?(?<id>[^>]*)>?/)
     record["message_id"] = result["id"] if result
 
+    record["recipients"] ||= {}
+
     # search relay, to and status
-    # step INCOMING_EMAIL, step SPAM_ASSASSIN, and step PROCESS_EMAIL
-    result = message.match(/to=<(?<to>[^>]*)>.* relay=(?<relay>[^,]*).* status=(?<status>[^ ]*)/)
+    result = message.match(/to=<(?<to>[^>]*)>.* relay=(?<relay>[^,]*).* status=(?<status>[^ ]*) \((?<message>[^\)]*)/)
     if result
-      # TODO check relay none, webhook
-      if result["relay"].match(/127.0.0.1/)
-        # set step to INCOMING_EMAIL
-        record["step"] = INCOMING_EMAIL
-      elsif result["relay"].match(/spamassassin/)
-        # set step to SPAM_ASSASSIN
+      status = result["status"]
+
+      if result["relay"].match(/dreamavis.dwp.net.id/)
+        record["step"] = AMAVIS
+        status = "virus" if result["message"].match(/BOUNCE/)
+      end
+
+      if result["relay"] == "127.0.0.1[127.0.0.1]:10026"
+        record["step"] = ANTI_VIRUS
+        status = "virus" if result["message"] == "250 Virus Detected; Discarded Email" || result["message"].match(/BOUNCE/)
+      elsif result["relay"] == "127.0.0.1[127.0.0.1]:10027"
+        record["step"] = WHITELIST
+      elsif result["relay"] == "spamassassin"
         record["step"] = SPAM_ASSASSIN
       else
         record["step"] = PROCESS_EMAIL if !record["step"]
+
+        ignored_relays = ["autoreply", "archivefilter", "webhook"]
+        ignored_relay = ignored_relays.include?(result["relay"])
       end
 
-      record["recipients"][result["to"]] = build_recipient(time, message, result["status"], result["relay"])
+      add_to_recipients = (record["step"] == PROCESS_EMAIL && !ignored_relay) || status == "virus"
+      if add_to_recipients
+        record["recipients"][result["to"]] = build_recipient(time, message, status, result["relay"])
+        record["removed"] = true
+      end
     end
 
     # REJECT AND NOQUEUE
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
-    if result || data["key"] == "NOQUEUE"
+    if result || key == "NOQUEUE"
       record["recipients"][result["to"]] = build_recipient(time, message, result["status"])
 
       record["removed"] = true
-      record["step"] = INCOMING_EMAIL if record["step"]
+      record["step"] = ANTI_VIRUS if !record["step"]
     end
 
     # queue: removed
-    # step INCOMING_EMAIL, step SPAM_ASSASSIN, and step PROCESS_EMAIL
+    # step ANTI_VIRUS, step SPAM_ASSASSIN, and step PROCESS_EMAIL
     record["removed"] = true if message == "#{data["key"]}: removed"
 
     record
@@ -297,9 +300,8 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   end
 
   def validate_data(record)
-    return true if record["step"] == INCOMING_EMAIL && record["from"]
     return true if [SPAM_ASSASSIN, PROCESS_EMAIL].include?(record["step"]) && record["message_id"]
-    return true if [NOQUEUE_EMAIL, BOUNCE_EMAIL, IGNORED_EMAIL].include?(record["step"])
+    return true if [NOQUEUE_EMAIL, ANTI_VIRUS, WHITELIST].include?(record["step"])
 
     false
   end
@@ -324,37 +326,26 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       mail_log_id = pg_row["id"]
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
-    when BOUNCE_EMAIL
-      mail_log_id = insert_log(record)
-
-      record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
-      end
-
-    when INCOMING_EMAIL
+    when ANTI_VIRUS, AMAVIS
       record["message_id"] = "" if !record["message_id"]
 
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, false)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
-    when SPAM_ASSASSIN
+    when SPAM_ASSASSIN, WHITELIST
       mail_log_id = insert_log(record)
-
-      record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, false)
-      end
 
     when PROCESS_EMAIL
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
     end
@@ -410,12 +401,12 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   ##
   # Insert into message and status
-  def insert_message_status(mail_log_id, to, detail, update = true)
+  def insert_message_status(mail_log_id, to, detail, key)
     # insert mail log messages
     mail_log_message_id = insert_message(mail_log_id, detail)
 
     # insert/update mail log statuses
-    insert_status(mail_log_id, mail_log_message_id, to, detail, update)
+    insert_status(mail_log_id, mail_log_message_id, to, detail, key)
   end
 
   ##
@@ -435,17 +426,22 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   ##
   # Insert into mail_log_statuses
-  def insert_status(mail_log_id, mail_log_message_id, to, detail, update = true)
+  def insert_status(mail_log_id, mail_log_message_id, to, detail, key)
     time = format_time_db(detail["time"])
 
     data = [ mail_log_id, to ]
+    # data = [ mail_log_id, to, key ]
     pg_row = search_status(data)
     data = [ detail["status"], time, mail_log_message_id ]
+    # data = [ detail["status"], detail["relay"], time, mail_log_message_id, key]
     if pg_row
-      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}" if update
+      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}"
+      # query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, relay=$2, log_time=$3, mail_log_message_id=$4, queue_id=$5 WHERE id=#{pg_row["id"]}"
     else
       data = [ mail_log_id, to ] + data
       query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, log_time, mail_log_message_id) VALUES ($1, $2, $3 ,$4, $5)"
+      # query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, relay, log_time, mail_log_message_id, queue_id) "
+      # query += "VALUES ($1, $2, $3, $4, $5, $6, $7)"
     end
     execute_query(query, data, true) if query
   end
@@ -479,6 +475,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     query = "SELECT id, recipient, process_start, queued_as, message_id FROM #{@schema}.#{@table_mail_logs} WHERE '#{params[:key]}'=ANY(queued_as) "
     query += "OR '#{params[:message_id]}'=message_id " if params[:message_id]
     query += "OR '#{params[:queued_as]}'=ANY(queued_as) " if params[:queued_as]
+    # query += "AND queued_as <> '{}' "
     query += "ORDER BY id DESC "
 
     execute_and_return(query, data)
@@ -495,6 +492,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   # Search mail log status
   def search_status(data)
     query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2"
+    # query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2 AND queue_id=$3"
     execute_and_return(query, data)
   end
 

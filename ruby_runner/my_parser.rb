@@ -4,20 +4,20 @@ class MyParser
   # rejected and has no queue
   NOQUEUE_EMAIL = 0
 
-  # get email header from this process from, to, and subject
+  # relay=127.0.0.1[127.0.0.1]:10026
   ANTI_VIRUS = 1
 
-  # SPAM_ASSASSIN is a requeue, this process generate message-id if email message-id empty
+  # relay=spamassassin
   SPAM_ASSASSIN = 2
 
-  # PROCESS_EMAIL is delivery status including autoforward and detail from alias
+  # relay=#{email_server}
   PROCESS_EMAIL = 3
 
-  # bounce email status
-  BOUNCE_EMAIL = 4
+  # relay=127.0.0.1[127.0.0.1]:10027
+  WHITELIST = 4
 
-  # ignored email
-  IGNORED_EMAIL = 10
+  # relay=dreamavis.dwp.net.id[45.64.4.191]:10024
+  AMAVIS = 5
 
   def initialize(logger, redis, pg, schema)
     @logger = logger
@@ -25,7 +25,7 @@ class MyParser
     @pg = pg
     @schema = schema
 
-    redis_expire_hours = 27
+    redis_expire_hours = 27 * 7
     @redis_expire_time = redis_expire_hours * 3600
 
     @table_mail_logs = "mail_logs"
@@ -91,8 +91,6 @@ class MyParser
     result = message.match(/from=<(?<from>[^>]*)>/)
     if result && !record["from"]
       record["from"] = result["from"]
-      # set step to bounce email
-      record["step"] = BOUNCE_EMAIL if result["from"] == ""
     end
 
     # search subject
@@ -116,23 +114,31 @@ class MyParser
     # search relay, to and status
     result = message.match(/to=<(?<to>[^>]*)>.* relay=(?<relay>[^,]*).* status=(?<status>[^ ]*) \((?<message>[^\)]*)/)
     if result
-      # TODO check relay none, webhook
-      # step ANTI_VIRUS
-      if result["relay"] == "127.0.0.1[127.0.0.1]:10026"
-        record["step"] = ANTI_VIRUS
-      # step SPAM_ASSASSIN
-      elsif result["relay"] == "spamassassin"
-        record["step"] = SPAM_ASSASSIN
-      # step PROCESS_EMAIL
-      else
-        record["step"] = PROCESS_EMAIL if !record["step"]
+      status = result["status"]
+
+      if result["relay"].match(/dreamavis.dwp.net.id/)
+        record["step"] = AMAVIS
+        status = "virus" if result["message"].match(/BOUNCE/)
       end
 
-      status = result["status"]
-      status = "virus" if result["message"] == "250 Virus Detected; Discarded Email"
+      if result["relay"] == "127.0.0.1[127.0.0.1]:10026"
+        record["step"] = ANTI_VIRUS
+        status = "virus" if result["message"] == "250 Virus Detected; Discarded Email" || result["message"].match(/BOUNCE/)
+      elsif result["relay"] == "127.0.0.1[127.0.0.1]:10027"
+        record["step"] = WHITELIST
+      elsif result["relay"] == "spamassassin"
+        record["step"] = SPAM_ASSASSIN
+      else
+        record["step"] = PROCESS_EMAIL if !record["step"]
 
-      if record["step"] != ANTI_VIRUS || status == "virus"
+        ignored_relays = ["autoreply", "archivefilter", "webhook"]
+        ignored_relay = ignored_relays.include?(result["relay"])
+      end
+
+      add_to_recipients = (record["step"] == PROCESS_EMAIL && !ignored_relay) || status == "virus"
+      if add_to_recipients
         record["recipients"][result["to"]] = build_recipient(time, message, status, result["relay"])
+        record["removed"] = true
       end
     end
 
@@ -167,9 +173,8 @@ class MyParser
   end
 
   def validate_data(record)
-    return true if record["step"] == ANTI_VIRUS && record["from"]
     return true if [SPAM_ASSASSIN, PROCESS_EMAIL].include?(record["step"]) && record["message_id"]
-    return true if [NOQUEUE_EMAIL, BOUNCE_EMAIL, IGNORED_EMAIL].include?(record["step"])
+    return true if [NOQUEUE_EMAIL, ANTI_VIRUS, WHITELIST].include?(record["step"])
 
     false
   end
@@ -194,37 +199,26 @@ class MyParser
       mail_log_id = pg_row["id"]
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
-    when BOUNCE_EMAIL
-      mail_log_id = insert_log(record)
-
-      record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
-      end
-
-    when ANTI_VIRUS
+    when ANTI_VIRUS, AMAVIS
       record["message_id"] = "" if !record["message_id"]
 
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, false)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
-    when SPAM_ASSASSIN
+    when SPAM_ASSASSIN, WHITELIST
       mail_log_id = insert_log(record)
-
-      # record["recipients"].each do |to, detail|
-      #   insert_message_status(mail_log_id, to, detail, false)
-      # end
 
     when PROCESS_EMAIL
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail)
+        insert_message_status(mail_log_id, to, detail, record["key"])
       end
 
     end
@@ -280,12 +274,12 @@ class MyParser
 
   ##
   # Insert into message and status
-  def insert_message_status(mail_log_id, to, detail, update = true)
+  def insert_message_status(mail_log_id, to, detail, key)
     # insert mail log messages
     mail_log_message_id = insert_message(mail_log_id, detail)
 
     # insert/update mail log statuses
-    insert_status(mail_log_id, mail_log_message_id, to, detail, update)
+    insert_status(mail_log_id, mail_log_message_id, to, detail, key)
   end
 
   ##
@@ -305,17 +299,18 @@ class MyParser
 
   ##
   # Insert into mail_log_statuses
-  def insert_status(mail_log_id, mail_log_message_id, to, detail, update = true)
+  def insert_status(mail_log_id, mail_log_message_id, to, detail, key)
     time = format_time_db(detail["time"])
 
-    data = [ mail_log_id, to ]
+    data = [ mail_log_id, to, key ]
     pg_row = search_status(data)
-    data = [ detail["status"], time, mail_log_message_id ]
+    data = [ detail["status"], detail["relay"], time, mail_log_message_id, key]
     if pg_row
-      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}" if update
+      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, relay=$2, log_time=$3, mail_log_message_id=$4, queue_id=$5 WHERE id=#{pg_row["id"]}"
     else
       data = [ mail_log_id, to ] + data
-      query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, log_time, mail_log_message_id) VALUES ($1, $2, $3 ,$4, $5)"
+      query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, relay, log_time, mail_log_message_id, queue_id) "
+      query += "VALUES ($1, $2, $3, $4, $5, $6, $7)"
     end
     execute_query(query, data, true) if query
   end
@@ -349,6 +344,7 @@ class MyParser
     query = "SELECT id, recipient, process_start, queued_as, message_id FROM #{@schema}.#{@table_mail_logs} WHERE '#{params[:key]}'=ANY(queued_as) "
     query += "OR '#{params[:message_id]}'=message_id " if params[:message_id]
     query += "OR '#{params[:queued_as]}'=ANY(queued_as) " if params[:queued_as]
+    # query += "AND queued_as <> '{}' "
     query += "ORDER BY id DESC "
 
     execute_and_return(query, data)
@@ -364,7 +360,7 @@ class MyParser
   ##
   # Search mail log status
   def search_status(data)
-    query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2"
+    query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2 AND queue_id=$3"
     execute_and_return(query, data)
   end
 

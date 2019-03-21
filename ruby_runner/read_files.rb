@@ -19,7 +19,7 @@ def main
   @pg = pg.connect
   @logger.info @pg
 
-  paths = Dir[CONFIG["log_path"]]
+  paths = Dir[CONFIG["log_path"]].sort
   paths.each do |path|
     read_file(path)
   end

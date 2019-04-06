@@ -17,10 +17,6 @@ services:
       - ./postgres:/postgres
       # mount data
       - ./postgres/data:/var/lib/postgresql/data
-      # mount data for windows use this
-      # http://www.lukaszewczak.com/2016/09/run-postgresql-using-docker-with.html
-      # docker volume create --name postgres-vol -d local
-      # - postgres-vol:/var/lib/postgresql/data:rw
 
   pgadmin:
     image: dpage/pgadmin4
@@ -31,7 +27,6 @@ services:
     ports:
       - 5050:80
     volumes:
-      # mount configurations
       - ./pgadmin:/var/lib/pgadmin
     links:
       - postgres
@@ -52,7 +47,6 @@ services:
     ports:
       - 3306:3306
     volumes:
-      # - ./mysql/my.conf:/etc/mysql/conf.d/config-file.cnf
       - ./mysql/data:/var/lib/mysql:rw
 
   redis:
@@ -119,7 +113,15 @@ services:
       - MB_DB_HOST=postgres
     links:
       - postgres
-# for windows use this
-# volumes:
-#   postgres-vol:
-#     external: true
+
+  odoo:
+    image: odoo
+    container_name: odoo
+    ports:
+      - 8069:8069
+    environment:
+      - HOST=postgres
+      # - USER=postgres
+      # - PASSWORD=postgres
+    links:
+      - postgres

@@ -9,8 +9,9 @@ RUN apk add --update --virtual .build-deps \
 RUN sudo gem install \
         pg \
         redis \
-        connection_pool
+        connection_pool \
+        httparty
 
 RUN sudo gem sources --clear-all \
- && rm -rf /var/cache/apk/* \
-           /home/fluent/.gem/ruby/2.3.0/cache/*.gem
+        && rm -rf /var/cache/apk/* \
+        /home/fluent/.gem/ruby/2.3.0/cache/*.gem

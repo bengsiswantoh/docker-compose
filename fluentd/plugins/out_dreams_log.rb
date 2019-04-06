@@ -53,6 +53,10 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   config_param :table_mail_log_messages, :string, default: "mail_log_messages"
   config_param :table_mail_log_statuses, :string, default: "mail_log_statuses"
 
+  config_param :mattermost, :string, default: "https://chat.dwp.io/hooks/6k15sg81dbbzzy5wdnyihx3h3h"
+  config_param :mattermost_username, :string, default: "fluentd"
+  config_param :mattermost_channel, :string, default: "dreams-notification"
+
   attr_accessor :pg_conn
   attr_accessor :redis_conn
   attr_accessor :redis_expire_time
@@ -132,19 +136,14 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       record = build_record(data, redis_key)
 
       if key != "NOQUEUE"
-        self.redis_conn.with do |conn|
-          # save to redis
-          conn.set(redis_key, record.to_json)
-          # set expire time
-          conn.expire(redis_key, self.redis_expire_time)
-        end
+        save_to_redis(redis_key, record)
       end
 
       # if queue removed, save to postgres
       if record && record["removed"] && validate_data(record)
         # log.info "set #{redis_key} => #{ record.to_json }"
 
-        save_to_db(record)
+        save_to_db(record, redis_key)
 
         # delete from redis
         # self.redis_conn.with do |conn|
@@ -207,6 +206,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       record["removed"] = true
     else
       # get data from redis
+      redis_data = nil
       self.redis_conn.with do |conn|
         redis_data = conn.get(redis_key)
       end
@@ -254,7 +254,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
       if result["relay"] == "127.0.0.1[127.0.0.1]:10026"
         record["step"] = ANTI_VIRUS
-        status = "virus" if result["message"] == "250 Virus Detected; Discarded Email" || result["message"].match(/BOUNCE/)
+        status = "virus" if result["message"] == "250 Virus Detected; Discarded Email"
       elsif result["relay"] == "127.0.0.1[127.0.0.1]:10027"
         record["step"] = WHITELIST
       elsif result["relay"] == "spamassassin"
@@ -291,6 +291,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   def build_recipient(time, message, status, relay = nil)
     recipient = {}
+    recipient["saved"] = false
     recipient["time"] = time
     recipient["message"] = message
     recipient["status"] = status
@@ -301,14 +302,23 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   def validate_data(record)
     return true if [SPAM_ASSASSIN, PROCESS_EMAIL].include?(record["step"]) && record["message_id"]
-    return true if [NOQUEUE_EMAIL, ANTI_VIRUS, WHITELIST].include?(record["step"])
+    return true if [NOQUEUE_EMAIL, ANTI_VIRUS, WHITELIST, AMAVIS].include?(record["step"])
 
     false
   end
 
+  def save_to_redis(redis_key, record)
+    self.redis_conn.with do |conn|
+      # save to redis
+      conn.set(redis_key, record.to_json)
+      # set expire time
+      conn.expire(redis_key, self.redis_expire_time)
+    end
+  end
+
   ##
   # Save record from redis to postgres
-  def save_to_db(record)
+  def save_to_db(record, redis_key)
     case record["step"]
     when NOQUEUE_EMAIL
       recipients = parse_recipients(record)
@@ -326,7 +336,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       mail_log_id = pg_row["id"]
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, record["key"])
+        insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
 
     when ANTI_VIRUS, AMAVIS
@@ -335,7 +345,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, record["key"])
+        insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
 
     when SPAM_ASSASSIN, WHITELIST
@@ -345,7 +355,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
       mail_log_id = insert_log(record)
 
       record["recipients"].each do |to, detail|
-        insert_message_status(mail_log_id, to, detail, record["key"])
+        insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
 
     end
@@ -401,12 +411,12 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   ##
   # Insert into message and status
-  def insert_message_status(mail_log_id, to, detail, key)
+  def insert_message_status(mail_log_id, to, detail, record, redis_key)
     # insert mail log messages
     mail_log_message_id = insert_message(mail_log_id, detail)
 
     # insert/update mail log statuses
-    insert_status(mail_log_id, mail_log_message_id, to, detail, key)
+    insert_status(mail_log_id, mail_log_message_id, to, detail, record, redis_key)
   end
 
   ##
@@ -426,24 +436,28 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
   ##
   # Insert into mail_log_statuses
-  def insert_status(mail_log_id, mail_log_message_id, to, detail, key)
-    time = format_time_db(detail["time"])
+  def insert_status(mail_log_id, mail_log_message_id, to, detail, record, redis_key)
+    if !detail["saved"]
+      key = record["key"]
+      time = format_time_db(detail["time"])
 
-    data = [ mail_log_id, to ]
-    # data = [ mail_log_id, to, key ]
-    pg_row = search_status(data)
-    data = [ detail["status"], time, mail_log_message_id ]
-    # data = [ detail["status"], detail["relay"], time, mail_log_message_id, key]
-    if pg_row
-      query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, log_time=$2, mail_log_message_id=$3 WHERE id=#{pg_row["id"]}"
-      # query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, relay=$2, log_time=$3, mail_log_message_id=$4, queue_id=$5 WHERE id=#{pg_row["id"]}"
-    else
-      data = [ mail_log_id, to ] + data
-      query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, log_time, mail_log_message_id) VALUES ($1, $2, $3 ,$4, $5)"
-      # query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, relay, log_time, mail_log_message_id, queue_id) "
-      # query += "VALUES ($1, $2, $3, $4, $5, $6, $7)"
+      data = [ mail_log_id, to, key ]
+      pg_row = search_status(data)
+      data = [ detail["status"], detail["relay"], time, mail_log_message_id, key]
+      if pg_row
+        query = "UPDATE #{@schema}.#{@table_mail_log_statuses} SET status=$1, relay=$2, log_time=$3, mail_log_message_id=$4, queue_id=$5 WHERE id=#{pg_row["id"]} returning id"
+      else
+        data = [ mail_log_id, to ] + data
+        query = "INSERT INTO #{@schema}.#{@table_mail_log_statuses} (mail_log_id, recipient, status, relay, log_time, mail_log_message_id, queue_id) "
+        query += "VALUES ($1, $2, $3, $4, $5, $6, $7) returning id"
+      end
+
+      result = execute_and_return(query, data, true) if query
+      if result
+        detail["saved"] = true
+        save_to_redis(redis_key, record)
+      end
     end
-    execute_query(query, data, true) if query
   end
 
   ##
@@ -491,8 +505,8 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
   ##
   # Search mail log status
   def search_status(data)
-    query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2"
-    # query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2 AND queue_id=$3"
+    # query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2"
+    query = "SELECT id FROM #{@schema}.#{@table_mail_log_statuses} WHERE mail_log_id=$1 AND recipient=$2 AND queue_id=$3"
     execute_and_return(query, data)
   end
 
@@ -524,6 +538,16 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
 
     rescue => err
       log.fatal "#{err} #{query} #{data}"
+
+      # info to mattermost
+      headers = { 'Content-Type' => 'application/json' }
+      address = @mattermost
+      body = {}
+      body[:username] = @mattermost_username
+      body[:channel] = @mattermost_channel
+      body[:text] = "#{err} #{query} #{data}"
+      HTTParty.post(address, body: body.to_json, headers: headers)
+
     end
   end
 end

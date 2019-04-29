@@ -107,6 +107,7 @@ class MyParser
     record["message_id"] = result["id"] if result
 
     record["recipients"] ||= {}
+    record["details"] ||= {}
 
     # search relay, to and status
     result = message.match(/to=<(?<to>[^>]*)>.* relay=(?<relay>[^,]*).* status=(?<status>[^ ]*) \((?<message>[^\)]*)/)
@@ -132,17 +133,26 @@ class MyParser
         ignored_relay = ignored_relays.include?(result["relay"])
       end
 
-      add_to_recipients = (record["step"] == PROCESS_EMAIL && !ignored_relay) || status == "virus"
-      if add_to_recipients
+      if record["step"] != PROCESS_EMAIL
         record["recipients"][result["to"]] = build_recipient(time, message, status, result["relay"])
+        if status == "virus"
+          record["details"][result["to"]] = build_recipient(time, message, status, result["relay"])
+        end
         record["removed"] = true
+      else
+        if !ignored_relay
+          record["details"][result["to"]] = build_recipient(time, message, status, result["relay"])
+          record["removed"] = true
+        end
       end
+
     end
 
     # REJECT AND NOQUEUE
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
     if result || key == "NOQUEUE"
       record["recipients"][result["to"]] = build_recipient(time, message, result["status"])
+      record["details"][result["to"]] = build_recipient(time, message, status, result["relay"])
 
       record["removed"] = true
       record["step"] = ANTI_VIRUS if !record["step"]
@@ -203,29 +213,25 @@ class MyParser
       end
       mail_log_id = pg_row["id"]
 
-      record["recipients"].each do |to, detail|
+      record["details"].each do |to, detail|
         insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
 
-    when ANTI_VIRUS, AMAVIS
+    when ANTI_VIRUS, AMAVIS, SPAM_ASSASSIN, WHITELIST
       record["message_id"] = "" if !record["message_id"]
 
       mail_log_id = insert_log(record)
 
-      record["recipients"].each do |to, detail|
+      record["details"].each do |to, detail|
         insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
-
-    when SPAM_ASSASSIN, WHITELIST
-      mail_log_id = insert_log(record)
 
     when PROCESS_EMAIL
       mail_log_id = insert_log(record)
 
-      record["recipients"].each do |to, detail|
+      record["details"].each do |to, detail|
         insert_message_status(mail_log_id, to, detail, record, redis_key)
       end
-
     end
 
   end

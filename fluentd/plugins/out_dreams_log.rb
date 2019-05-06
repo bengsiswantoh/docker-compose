@@ -66,6 +66,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     require "pg"
     require "redis"
     require "connection_pool"
+    require "httparty"
   end
 
   ##
@@ -286,7 +287,7 @@ class Fluent::DreamsLogOutput < Fluent::Plugin::Output
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
     if result || key == "NOQUEUE"
       record["recipients"][result["to"]] = build_recipient(time, message, result["status"])
-      record["details"][result["to"]] = build_recipient(time, message, status, result["relay"])
+      record["details"][result["to"]] = build_recipient(time, message, result["status"])
 
       record["removed"] = true
       record["step"] = ANTI_VIRUS if !record["step"]

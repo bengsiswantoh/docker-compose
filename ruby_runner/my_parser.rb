@@ -152,7 +152,7 @@ class MyParser
     result = message.match(/(?<status>reject|discard):.* to=<(?<to>[^>]*)>/)
     if result || key == "NOQUEUE"
       record["recipients"][result["to"]] = build_recipient(time, message, result["status"])
-      record["details"][result["to"]] = build_recipient(time, message, status, result["relay"])
+      record["details"][result["to"]] = build_recipient(time, message, result["status"])
 
       record["removed"] = true
       record["step"] = ANTI_VIRUS if !record["step"]

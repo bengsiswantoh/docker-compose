@@ -14,9 +14,7 @@ services:
       # host port:docker port
       - 5432:5432
     volumes:
-      - ./postgres:/postgres
-      # mount data
-      - ./postgres/data:/var/lib/postgresql/data
+      - ~/docker_data/postgres/data:/var/lib/postgresql/data
 
   pgadmin:
     image: dpage/pgadmin4
@@ -28,7 +26,7 @@ services:
       - 5050:80
     volumes:
       - ./pgadmin:/var/lib/pgadmin
-    links:
+    depends_on:
       - postgres
 
   pghero:
@@ -77,7 +75,7 @@ services:
       - ./fluentd:/fluentd
     environment:
       - FLUENTD_CONF=fluentd.conf
-    links:
+    depends_on:
       - redis
       - postgres
 
@@ -95,7 +93,7 @@ services:
     volumes:
       - ./ruby_runner:/usr/src/myapp
     command: ruby /usr/src/myapp/read_files.rb
-    links:
+    depends_on:
       - postgres
       - redis
 
@@ -111,7 +109,7 @@ services:
       - MB_DB_USER=postgres
       - MB_DB_PASS=postgres
       - MB_DB_HOST=postgres
-    links:
+    depends_on:
       - postgres
 
   odoo:
@@ -123,5 +121,11 @@ services:
       - HOST=postgres
       # - USER=postgres
       # - PASSWORD=postgres
-    links:
+    depends_on:
       - postgres
+
+  mattermost:
+    image: mattermost/mattermost-preview
+    container_name: mattermost
+    ports:
+      - 8065:8065

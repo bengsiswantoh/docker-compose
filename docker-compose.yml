@@ -14,7 +14,7 @@ services:
       # host port:docker port
       - 5432:5432
     volumes:
-      - ~/docker_data/postgres/data:/var/lib/postgresql/data
+      - ./postgres/data:/var/lib/postgresql/data
 
   pgadmin:
     image: dpage/pgadmin4
@@ -46,6 +46,16 @@ services:
       - 3306:3306
     volumes:
       - ./mysql/data:/var/lib/mysql:rw
+
+  phpmyadmin:
+    image: phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      - PMA_ARBITRARY=1
+    ports:
+      - 8080:80
+    depends_on:
+      - mysql
 
   redis:
     image: redis

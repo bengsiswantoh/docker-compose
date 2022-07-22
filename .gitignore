@@ -1,6 +1,7 @@
 mysql/data
 postgres/data
 pgadmin
+openhab
 
 .byebug_history
 *.log
